@@ -1,0 +1,9 @@
+node_modules/
+.env
+*.log
+npm-debug.log*
+.DS_Store
+backups/
+
+# Claude Code local (machine-specific) settings — the shared hook lives in .claude/settings.json
+.claude/settings.local.json
