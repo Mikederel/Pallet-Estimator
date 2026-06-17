@@ -10,19 +10,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3005;
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "30mb" })); // base64-encoded PDFs ride in the JSON body
 app.use(express.static(join(__dirname, "..", "public")));
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// Estimate pallets from a free-text material list.
+// Estimate pallets from uploaded PDFs (material lists + optional BOM) and/or pasted text.
 app.post("/api/estimate", async (req, res) => {
-  const { materialList } = req.body || {};
-  if (!materialList || typeof materialList !== "string" || !materialList.trim()) {
-    return res.status(400).json({ error: "materialList (non-empty string) is required" });
+  const { materialList, pdfs } = req.body || {};
+  const hasText = typeof materialList === "string" && materialList.trim().length > 0;
+  const validPdfs = Array.isArray(pdfs) ? pdfs.filter((p) => p && typeof p.dataB64 === "string") : [];
+  if (!hasText && !validPdfs.length) {
+    return res.status(400).json({ error: "Provide pdfs ([{name,dataB64}]) and/or materialList (text)." });
   }
   try {
-    const result = await estimatePallets(materialList.trim());
+    const result = await estimatePallets({ materialList, pdfs: validPdfs });
     res.json(result);
   } catch (err) {
     console.error("[estimate] error:", err);
@@ -30,30 +32,18 @@ app.post("/api/estimate", async (req, res) => {
   }
 });
 
-// List worked examples (few-shot training data).
+// List ingested examples (few-shot training data), metadata only.
 app.get("/api/examples", async (req, res) => {
-  const docs = await collections.examples().find().sort({ createdAt: -1 }).toArray();
+  const docs = await collections
+    .examples()
+    .find({ pallets: { $type: "array" } })
+    .project({ job: 1, suffix: 1, source: 1, palletCount: 1, totalWeight: 1 })
+    .sort({ job: 1, suffix: 1 })
+    .toArray();
   res.json(docs);
 });
 
-// Add a worked example (structured materials[] OR free-text rawText).
-app.post("/api/examples", async (req, res) => {
-  const { materials, rawText, pallets, notes } = req.body || {};
-  const hasMaterials = Array.isArray(materials) && materials.length > 0;
-  const hasRaw = typeof rawText === "string" && rawText.trim().length > 0;
-  if (typeof pallets !== "number" || (!hasMaterials && !hasRaw)) {
-    return res
-      .status(400)
-      .json({ error: "Provide pallets (number) and either materials (array) or rawText (string)." });
-  }
-  const doc = { pallets, notes: notes || "", createdAt: new Date() };
-  if (hasMaterials) doc.materials = materials;
-  if (hasRaw) doc.rawText = rawText.trim();
-  const { insertedId } = await collections.examples().insertOne(doc);
-  res.status(201).json({ _id: insertedId, ...doc });
-});
-
-// Delete a worked example.
+// Delete an example.
 app.delete("/api/examples/:id", async (req, res) => {
   try {
     const { deletedCount } = await collections.examples().deleteOne({ _id: new ObjectId(req.params.id) });

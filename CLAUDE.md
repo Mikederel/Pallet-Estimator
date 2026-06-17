@@ -39,8 +39,8 @@ pm2 start ecosystem.dev.config.cjs
 # Logs
 pm2 logs pallet-estimator-dev
 
-# Charger les exemples few-shot dans Mongo
-npm run seed
+# Charger les exemples de calibration depuis ./examples-data (un dossier par job)
+npm run ingest
 ```
 💡 Après chaque `pm2 start` / `restart` : **`pm2 save`** (persiste la liste des processus pour survie au reboot). À faire dev ET prod.
 
