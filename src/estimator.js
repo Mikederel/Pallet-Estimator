@@ -1,12 +1,8 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { buildSystemPrompt } from "./prompt.js";
 import { collections } from "./db.js";
 
 const MODEL = "claude-opus-4-8";
-
-const client = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
 
 const EstimateSchema = z.object({
   pallets: z.number().describe("Total whole number of pallets required"),
@@ -21,8 +17,27 @@ const EstimateSchema = z.object({
     .describe("Per-group pallet breakdown"),
 });
 
+// The Anthropic SDK is loaded lazily so that a missing key or an SDK/runtime
+// issue surfaces on /api/estimate only — it never prevents the server from
+// booting and serving the UI, examples, and /api/health.
+let _client;
+let _zodOutputFormat;
+
+async function getClient() {
+  if (_client) return _client;
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key || key.includes("xxxx")) {
+    throw new Error("ANTHROPIC_API_KEY is not set in .env (get one at https://console.anthropic.com).");
+  }
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  ({ zodOutputFormat: _zodOutputFormat } = await import("@anthropic-ai/sdk/helpers/zod"));
+  _client = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
+  return _client;
+}
+
 export async function estimatePallets(materialList) {
   const examples = await collections.examples().find().toArray();
+  const client = await getClient();
 
   const response = await client.messages.parse({
     model: MODEL,
@@ -41,7 +56,7 @@ export async function estimatePallets(materialList) {
         content: `Estimate the number of pallets for this material list:\n\n${materialList}`,
       },
     ],
-    output_config: { format: zodOutputFormat(EstimateSchema) },
+    output_config: { format: _zodOutputFormat(EstimateSchema) },
   });
 
   const result = response.parsed_output;
