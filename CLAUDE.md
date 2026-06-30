@@ -121,9 +121,9 @@ curl localhost:3005/api/health
 ```
 
 ## 9. Stack technique (où est quoi)
-- **Express (ESM)** — `src/server.js` (routes `/api/estimate`, `/api/jobs`, `/api/jobs/:id/close`, `/api/health`)
+- **Express (ESM)** — `src/router.js` = toutes les routes/UI dans un `palletRouter` montable (`/api/estimate`, `/api/jobs`, `/api/jobs/:id/close`, `/api/health`) ; `src/server.js` ne fait que monter ce routeur en standalone (:3004/:3005). Le même routeur se monte dans la calendar-app via `app.use("/pallets", palletRouter)` → un seul serveur. Voir README → « Embed in another Express app » (monter **avant** tout `express.json()` global ; utiliser `PALLET_DB_NAME` pour garder sa propre DB).
 - **MongoDB** (driver `mongodb`) — `src/db.js` ; collection `jobs` (le hub : BOM + estimé → résultats réels ; les jobs `closed` servent de few-shot)
 - **Claude** via `@anthropic-ai/sdk` — `src/estimator.js` (estimé depuis le BOM) + `src/reconcile.js` (résultats réels → exemple) + `src/pdf.js` (extraction PDF) + `src/anthropic.js` (client) ; modèle `claude-opus-4-8`, sortie structurée (JSON schema), thinking adaptatif, few-shot mis en cache (`cache_control`)
 - **Prompt few-shot** — `src/prompt.js`
-- **Frontend statique** — `public/index.html`
+- **Frontend statique** — `public/index.html` (les appels `fetch` sont relatifs au point de montage via `const BASE`, donc l'UI marche à `/` comme à `/pallets`)
 - **PM2** — `ecosystem.config.cjs` (prod :3004) / `ecosystem.dev.config.cjs` (dev :3005)

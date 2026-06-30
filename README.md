@@ -44,6 +44,7 @@ calibration-only; at estimate time just the BOM is used.
 | `MONGODB_URI` | Mongo connection (default `mongodb://127.0.0.1:27017`) |
 | `PORT` | HTTP port (set by PM2: 3004 prod / 3005 dev) |
 | `DB_NAME` | Mongo database (set by PM2: `pallet-estimator` / `pallet-estimator-dev`) |
+| `PALLET_DB_NAME` | Overrides `DB_NAME` — set this when embedding so the app keeps its own DB apart from the host app's |
 | `EXAMPLES_DIR` | Folder of example jobs for `npm run ingest` (default `./examples-data`) |
 
 ## How it learns (the hub)
@@ -56,6 +57,22 @@ and the next estimates improve. Bulk-seed past jobs with `npm run ingest`.
 - `GET /api/jobs` — list jobs (open = awaiting results, closed = calibrating)
 - `POST /api/jobs/:id/close` — `{ skidText, accuses?:[{name,dataB64}] }` → reconciles the real results into a calibration example
 - `DELETE /api/jobs/:id` · `GET /api/health`
+
+## Embed in another Express app (one server)
+The whole app is also an Express **router** (`palletRouter`), so an existing app — e.g. the
+calendar app — can serve it instead of you running a second server:
+
+```js
+import { palletRouter } from "pallet-estimator";   // CommonJS host: const { palletRouter } = await import("pallet-estimator")
+app.use("/pallets", palletRouter);                 // page at /pallets, API at /pallets/api/*
+```
+- **Mount it before any global `express.json()`** — the router brings its own 30 MB body parser
+  (base64 PDFs ride in the body); a smaller host limit would reject uploads.
+- It connects to Mongo lazily, so the host only has to `app.use(...)` — no `connectDB()` call needed.
+- Set **`PALLET_DB_NAME`** so it keeps its own database, separate from the host app's `DB_NAME`.
+- The host process needs **`ANTHROPIC_API_KEY`** in its environment.
+
+Install it as a local dependency in the host app: `npm install /path/to/pallet-estimator`.
 
 ## Deploy (PM2)
 ```bash

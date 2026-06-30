@@ -1,7 +1,10 @@
 import { MongoClient } from "mongodb";
 
 const uri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017";
-const dbName = process.env.DB_NAME || "pallet-estimator-dev";
+// PALLET_DB_NAME wins so this app keeps its own database when embedded in a host
+// app (e.g. calendar-app) that already uses DB_NAME for its own; DB_NAME is the
+// standalone fallback (set by the PM2 ecosystem files).
+const dbName = process.env.PALLET_DB_NAME || process.env.DB_NAME || "pallet-estimator-dev";
 
 let client;
 let db;

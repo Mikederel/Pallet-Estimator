@@ -79,6 +79,10 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// Resolve API paths against the page's mount point, so the app works both at
+// "/" (standalone) and at "/pallets" (embedded in the calendar app).
+const BASE = location.pathname.replace(/\/+$/, "");
+const api = (p) => `${BASE}/${p}`;
 
 const fileToB64 = (file) => new Promise((res, rej) => {
   const r = new FileReader();
@@ -111,7 +115,7 @@ async function estimate() {
   try {
     const pdfs = await Promise.all(files.map(async (f) => ({ name: f.name, dataB64: await fileToB64(f) })));
     $("status").textContent = "Estimating… (Opus reasons for ~10–30s)";
-    const r = await fetch("/api/estimate", {
+    const r = await fetch(api("api/estimate"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobNo, materialList, pdfs }),
     });
@@ -136,7 +140,7 @@ async function estimate() {
 
 async function loadJobs() {
   let jobs = [];
-  try { jobs = await (await fetch("/api/jobs")).json(); } catch { return; }
+  try { jobs = await (await fetch(api("api/jobs"))).json(); } catch { return; }
   const open = jobs.filter((j) => j.status !== "closed");
   const closed = jobs.filter((j) => j.status === "closed");
   $("openCount").textContent = open.length ? `(${open.length})` : "";
@@ -175,7 +179,7 @@ async function closeJob(id) {
   try {
     const skidText = await fileToText(txtInput.files[0]);
     const accuses = await Promise.all([...accInput.files].map(async (f) => ({ name: f.name, dataB64: await fileToB64(f) })));
-    const r = await fetch(`/api/jobs/${id}/close`, {
+    const r = await fetch(api(`api/jobs/${id}/close`), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ skidText, accuses }),
     });
@@ -189,7 +193,7 @@ async function closeJob(id) {
 
 async function delJob(id) {
   if (!confirm("Delete this job?")) return;
-  await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+  await fetch(api(`api/jobs/${id}`), { method: "DELETE" });
   loadJobs();
 }
 

@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "description": "Estimate pallet/skid dimensions and weights from a shipment's material list (PDF) using Claude (Opus 4.8), calibrated on real example shipments stored in MongoDB.",
   "type": "module",
-  "main": "src/server.js",
+  "main": "src/router.js",
+  "exports": {
+    ".": "./src/router.js",
+    "./router": "./src/router.js"
+  },
   "engines": {
     "node": ">=20"
   },
