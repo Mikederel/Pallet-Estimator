@@ -42,6 +42,7 @@ async function getClient() {
 }
 
 // input: { materialList?: string, pdfs?: [{ name, dataB64 }] }
+// At estimate time the BOM PDF is the expected input.
 export async function estimatePallets({ materialList, pdfs = [] } = {}) {
   const examples = await collections.examples().find({ pallets: { $type: "array" } }).toArray();
   const client = await getClient();
@@ -49,7 +50,7 @@ export async function estimatePallets({ materialList, pdfs = [] } = {}) {
   const content = [
     {
       type: "text",
-      text: "Here are the shipment documents. Some are material lists (Quantité / Produit / Description = what is shipped); one may be a Bill of Materials listing a unit weight per product code. Use them together.",
+      text: "Here is the Bill of Materials (BOM) for a job — the full list of products, quantities, and unit weights. This is the only document available now (the per-shipment accusés come later); estimate from the BOM alone.",
     },
   ];
   for (const f of pdfs) {
@@ -60,11 +61,11 @@ export async function estimatePallets({ materialList, pdfs = [] } = {}) {
     });
   }
   if (materialList && materialList.trim()) {
-    content.push({ type: "text", text: `Additional pasted material list / notes:\n${materialList.trim()}` });
+    content.push({ type: "text", text: `Additional pasted notes / material list:\n${materialList.trim()}` });
   }
   content.push({
     type: "text",
-    text: `Estimate how this shipment is packed onto pallets. ${DIM_RULES}\nReturn each pallet's W x L x H and approximate weight, plus the total weight.`,
+    text: `Estimate the complete set of pallets this whole job will require. ${DIM_RULES}\nReturn each pallet's W x L x H and approximate weight, plus the total weight.`,
   });
 
   const response = await client.messages.create({
@@ -92,7 +93,6 @@ export async function estimatePallets({ materialList, pdfs = [] } = {}) {
     throw new Error("Model returned non-JSON output (try again, or the response was truncated).");
   }
 
-  // Log the estimation for later review / tuning (best-effort).
   try {
     await collections.estimations().insertOne({
       input: materialList || null,

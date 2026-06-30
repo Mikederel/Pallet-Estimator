@@ -10,35 +10,25 @@ const { PDFParse } = require("pdf-parse");
 const MODEL = "claude-opus-4-8";
 const EXAMPLES_DIR = process.env.EXAMPLES_DIR || path.join(process.cwd(), "examples-data");
 
-// Claude normalizes each job's messy skid list into clean per-suffix examples.
+// Claude reconciles a job's BOM + per-shipment accusés + skid list into ONE
+// job-level example: the BOM (the estimate-time input) -> all the pallets it
+// became (the result we want to predict).
+const PALLET = {
+  type: "object",
+  properties: { w: { type: "number" }, l: { type: "number" }, h: { type: "number" }, weight: { type: "number" } },
+  required: ["w", "l", "h", "weight"],
+  additionalProperties: false,
+};
 const JOB_SCHEMA = {
   type: "object",
   properties: {
-    examples: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          suffix: { type: "string", description: "Shipment suffix, e.g. 01" },
-          reliable: { type: "boolean", description: "true only if this suffix has a clear material list AND a precise per-skid breakdown" },
-          palletCount: { type: "number" },
-          totalWeight: { type: "number", description: "Sum of pallet weights, lb" },
-          pallets: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { w: { type: "number" }, l: { type: "number" }, h: { type: "number" }, weight: { type: "number" } },
-              required: ["w", "l", "h", "weight"],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ["suffix", "reliable", "palletCount", "totalWeight", "pallets"],
-        additionalProperties: false,
-      },
-    },
+    bomSummary: { type: "string", description: "Concise normalized summary of the BOM: key product codes, quantities, unit + total weights" },
+    pallets: { type: "array", items: PALLET, description: "Every pallet/skid the whole job became, normalized to W x L x H + weight, de-duplicated" },
+    palletCount: { type: "number" },
+    totalWeight: { type: "number", description: "Total weight of all pallets, lb" },
+    note: { type: "string", description: "Coverage/confidence note (e.g. which shipments were imprecise or estimated)" },
   },
-  required: ["examples"],
+  required: ["bomSummary", "pallets", "palletCount", "totalWeight", "note"],
   additionalProperties: false,
 };
 
@@ -60,35 +50,39 @@ async function ingestJob(client, db, dir) {
   const files = fs.readdirSync(dir);
   const txtFile = files.find((f) => f.toLowerCase().endsWith(".txt"));
   const bomFile = files.find((f) => /(^|[^0-9])bom\.pdf$/i.test(f));
-  const listFiles = files.filter((f) => /\.(\d{2})\.pdf$/i.test(f)).sort();
+  const accuseFiles = files.filter((f) => /\.(\d{2})\.pdf$/i.test(f)).sort();
 
-  if (!txtFile || !listFiles.length) {
-    console.log(`[ingest] ${job}: skipped (need one .txt skid list and at least one .NN.pdf)`);
+  if (!txtFile || !bomFile) {
+    console.log(`[ingest] ${job}: skipped (need BOM.pdf and a .txt skid list)`);
     return 0;
   }
 
+  const bomText = await pdfText(path.join(dir, bomFile));
   const skidText = fs.readFileSync(path.join(dir, txtFile), "utf8");
-  const bomText = bomFile ? await pdfText(path.join(dir, bomFile)) : "";
-  const lists = {};
-  for (const f of listFiles) {
-    const suffix = f.match(/\.(\d{2})\.pdf$/i)[1];
-    lists[suffix] = await pdfText(path.join(dir, f));
+  const accuses = {};
+  for (const f of accuseFiles) {
+    accuses[f.match(/\.(\d{2})\.pdf$/i)[1]] = await pdfText(path.join(dir, f));
   }
 
-  const prompt = `You are normalizing real packing data into a training set for pallet estimation.
+  const prompt = `You are building a calibration example for pallet estimation. The model will later see ONLY a Bill of Materials (BOM) and must predict the pallets the whole job becomes.
 
-DIMENSIONS: output every pallet/skid as W x L x H in inches — W (width) first, normally <= 48"; L (length) the long side (<= ~145"); H (height) the vertical (<= ~68"). The skid list below may use an inconsistent order or format; REORDER each skid to W x L x H using these rules. Weights are pounds.
+DIMENSIONS: output every pallet/skid as W x L x H in inches — W (width) first, normally <= 48"; L (length) the long side (<= ~145"); H (height) the vertical (<= ~68"). The skid list below may use an inconsistent order or format; REORDER each to W x L x H. Weights are pounds.
 
-Return one entry per shipment suffix that has BOTH a material list (below) AND a clear, precise per-skid breakdown in the skid list. Set reliable=false for any suffix whose skid data is imprecise, combined across suffixes, or missing — those will be skipped.
+Produce ONE job-level result:
+- bomSummary: a concise normalized summary of the BOM (product codes, quantities, unit + total weights).
+- pallets: EVERY pallet/skid this job became, gathered from the skid list across all shipments, normalized to W x L x H + weight. De-duplicate overlapping/repeated sections. Where the skid list is imprecise, give your best estimate and say so in 'note'.
+- palletCount, totalWeight, and a 'note' on coverage/confidence.
+
+The per-shipment accusés (.01, .02, …) and the skid list are provided to help you map BOM items -> shipments -> pallets; they are NOT available at estimate time.
+
+== BILL OF MATERIALS (BOM) ==
+${bomText.slice(0, 16000)}
 
 == SKID LIST (${txtFile}) ==
 ${skidText}
 
-== BILL OF MATERIALS (unit weights, optional) ==
-${bomText ? bomText.slice(0, 12000) : "(none provided)"}
-
-== MATERIAL LISTS BY SUFFIX ==
-${Object.entries(lists).map(([s, t]) => `--- suffix ${s} ---\n${t.slice(0, 4000)}`).join("\n\n")}`;
+== PER-SHIPMENT ACCUSÉS (material lists, optional context) ==
+${Object.entries(accuses).map(([s, t]) => `--- shipment .${s} ---\n${t.slice(0, 3000)}`).join("\n\n") || "(none provided)"}`;
 
   const resp = await client.messages.create({
     model: MODEL,
@@ -103,40 +97,32 @@ ${Object.entries(lists).map(([s, t]) => `--- suffix ${s} ---\n${t.slice(0, 4000)
     console.log(`[ingest] ${job}: no output (stop_reason ${resp.stop_reason})`);
     return 0;
   }
-  const { examples } = JSON.parse(text);
-
-  let n = 0;
-  for (const ex of examples) {
-    if (!ex.reliable || !lists[ex.suffix] || !ex.pallets?.length) {
-      console.log(`[ingest] ${job}.${ex.suffix}: skipped (unreliable or unmatched)`);
-      continue;
-    }
-    await db.collection("examples").updateOne(
-      { job, suffix: ex.suffix },
-      {
-        $set: {
-          job,
-          suffix: ex.suffix,
-          source: txtFile.replace(/\.txt$/i, ""),
-          materialList: lists[ex.suffix],
-          pallets: ex.pallets,
-          palletCount: ex.palletCount,
-          totalWeight: ex.totalWeight,
-          updatedAt: new Date(),
-        },
-      },
-      { upsert: true }
-    );
-    n++;
-    console.log(`[ingest] ${job}.${ex.suffix}: ${ex.palletCount} pallet(s), ${ex.totalWeight} lb`);
+  const ex = JSON.parse(text);
+  if (!ex.pallets?.length) {
+    console.log(`[ingest] ${job}: no pallets parsed — skipped`);
+    return 0;
   }
-  return n;
+
+  // One example per job — replace any prior docs for this job.
+  await db.collection("examples").deleteMany({ job });
+  await db.collection("examples").insertOne({
+    job,
+    source: txtFile.replace(/\.txt$/i, ""),
+    bomSummary: ex.bomSummary,
+    pallets: ex.pallets,
+    palletCount: ex.palletCount,
+    totalWeight: ex.totalWeight,
+    note: ex.note,
+    updatedAt: new Date(),
+  });
+  console.log(`[ingest] ${job}: ${ex.palletCount} pallet(s), ${ex.totalWeight} lb${ex.note ? ` — ${ex.note}` : ""}`);
+  return 1;
 }
 
 const run = async () => {
   if (!fs.existsSync(EXAMPLES_DIR)) {
     console.error(`[ingest] EXAMPLES_DIR not found: ${EXAMPLES_DIR}
-Create it (one subfolder per job, each with .NN.pdf material lists + BOM.pdf + the .txt skid list), or set EXAMPLES_DIR.`);
+Create it (one subfolder per job, each with BOM.pdf + the .txt skid list, plus the .NN.pdf accusés), or set EXAMPLES_DIR.`);
     process.exit(1);
   }
   const db = await connectDB();
@@ -159,7 +145,7 @@ Create it (one subfolder per job, each with .NN.pdf material lists + BOM.pdf + t
       console.error(`[ingest] ${path.basename(dir)}: ERROR ${e.message}`);
     }
   }
-  console.log(`[ingest] done — ${total} example(s) upserted into the examples collection.`);
+  console.log(`[ingest] done — ${total} job example(s) in the examples collection.`);
   process.exit(0);
 };
 

@@ -1,6 +1,6 @@
-// Builds the few-shot system prompt for the pallet estimator from stored examples.
-// Each example is a real shipment: a material list -> the pallets it became
-// (W x L x H inches + weight lb), ingested from your example folders.
+// Builds the few-shot system prompt. Each example is a real past job:
+// its Bill of Materials (BOM) -> the pallets the whole job actually became
+// (W x L x H inches + weight lb). At estimate time the BOM is the only input.
 
 export const DIM_RULES = `Report every pallet/skid as W x L x H in inches:
 - W (width) comes first, and is normally <= 48".
@@ -15,14 +15,13 @@ function formatPallets(pallets = []) {
 }
 
 export function buildSystemPrompt(examples = []) {
-  // Only the new-shape examples (pallets is an array of {w,l,h,weight}).
   const usable = examples.filter((e) => Array.isArray(e.pallets) && e.pallets.length);
 
-  const header = `You are a logistics expert. From a shipment's material list (and a Bill of Materials with unit weights when provided), estimate how it is packed onto pallets/skids.
+  const header = `You are a logistics expert. From a job's Bill of Materials (BOM) — the only document available at estimate time — estimate how the WHOLE job will be packed onto pallets/skids.
 
 ${DIM_RULES}
 
-For each pallet, output an approximate W x L x H and an approximate weight, plus the total weight across all pallets. Group items sensibly, respecting the size limits above (split long runs of rail/track, keep heavy items low, etc.). The material list gives quantities + product codes + descriptions; the Bill of Materials gives unit weights per product code. Calibrate your dimensions, grouping, and weights against the worked examples below. Answer ONLY through the provided JSON schema.`;
+The BOM lists every product code, quantity, and unit weight for the job. Estimate the complete set of pallets the job will require: group items sensibly, respect the size limits above (split long rail/track runs, keep heavy items low, combine small parts), and give each pallet an approximate W x L x H and weight, plus the total weight. Calibrate dimensions, grouping, and weights against the worked examples below — each is a real past BOM and the pallets it actually became. Answer ONLY through the provided JSON schema.`;
 
   if (!usable.length) {
     return `${header}\n\n(No worked examples yet — estimate from first principles.)`;
@@ -30,13 +29,13 @@ For each pallet, output an approximate W x L x H and an approximate weight, plus
 
   const blocks = usable
     .map((e, i) => {
-      const tag = `job ${e.job ?? "?"}${e.suffix ? ` .${e.suffix}` : ""}`;
-      return `### Example ${i + 1} (${tag})
-Material list:
-${(e.materialList || "").trim()}
+      const note = e.note ? `\n(${String(e.note).trim()})` : "";
+      return `### Example ${i + 1} (job ${e.job ?? "?"})
+BOM (summary):
+${(e.bomSummary || "").trim()}
 
 Resulting pallets (${e.palletCount ?? e.pallets.length}, total ${e.totalWeight ?? "?"} lb):
-${formatPallets(e.pallets)}`;
+${formatPallets(e.pallets)}${note}`;
     })
     .join("\n\n");
 

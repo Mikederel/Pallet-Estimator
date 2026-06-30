@@ -1,8 +1,8 @@
 # Pallet Estimator
 
-Estimate how a shipment packs onto pallets/skids from its **material-list PDF(s)** (and a
-Bill of Materials for weights). An Express API sends the PDFs to **Claude (Opus 4.8)** with
-few-shot examples from real past shipments stored in MongoDB, and returns each pallet's
+Estimate how a whole job packs onto pallets/skids from its **Bill of Materials (BOM)** — the
+only document available at estimate time. An Express API sends the BOM PDF to **Claude (Opus 4.8)**
+with few-shot examples from real past jobs stored in MongoDB, and returns each pallet's
 approximate **`W × L × H`** + weight, plus the total:
 
 ```json
@@ -32,8 +32,9 @@ examples-data/
     BOM.pdf                    # bill of materials (unit weights)
     MJQ.txt                    # the skid list (ground truth: dims + weight per skid)
 ```
-`npm run ingest` walks those folders, has Claude normalize each suffix's skids to `W × L × H`,
-pairs them with the material list, and upserts them as few-shot examples.
+`npm run ingest` walks those folders and, per job, has Claude reconcile the BOM + accusés + skid
+list into one example (BOM → all the job's pallets, normalized to `W × L × H` + weight). The
+accusés (`.NN.pdf`) are calibration-only — at estimate time just the BOM is used.
 
 ## Environment
 | var | purpose |

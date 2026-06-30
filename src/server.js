@@ -37,8 +37,8 @@ app.get("/api/examples", async (req, res) => {
   const docs = await collections
     .examples()
     .find({ pallets: { $type: "array" } })
-    .project({ job: 1, suffix: 1, source: 1, palletCount: 1, totalWeight: 1 })
-    .sort({ job: 1, suffix: 1 })
+    .project({ job: 1, source: 1, palletCount: 1, totalWeight: 1, note: 1 })
+    .sort({ job: 1 })
     .toArray();
   res.json(docs);
 });

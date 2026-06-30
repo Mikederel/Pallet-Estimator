@@ -35,10 +35,10 @@
 <body>
 <div class="wrap">
   <h1>📦 Pallet Estimator</h1>
-  <p class="sub">Upload the shipment's material-list PDF(s) (and the BOM for weights). Claude estimates the pallets — each as <strong>W × L × H</strong> + approximate weight — calibrated on your real example shipments.</p>
+  <p class="sub">Upload the job's <strong>BOM</strong> (bill of materials) PDF. Claude estimates the whole job's pallets — each as <strong>W × L × H</strong> + approximate weight — calibrated on your real past jobs.</p>
 
   <div class="card">
-    <label for="files">Material list PDF(s) + BOM</label>
+    <label for="files">BOM (bill of materials) PDF</label>
     <input type="file" id="files" multiple accept="application/pdf" />
     <div style="margin-top:14px">
       <label for="ml">Or paste a material list (optional)</label>
@@ -126,7 +126,7 @@ async function loadExamples() {
       list
         .map(
           (ex) =>
-            `<div class="ex"><strong>${esc(ex.job)}.${esc(ex.suffix)}</strong>
+            `<div class="ex"><strong>${esc(ex.job)}</strong>
              <span class="mut">— ${esc(ex.palletCount)} pallet(s), ${esc(ex.totalWeight)} lb${ex.source ? " · " + esc(ex.source) : ""}</span></div>`
         )
         .join("") || `<p class="mut">No examples yet — run <code>npm run ingest</code>.</p>`;
