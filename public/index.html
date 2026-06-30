@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Pallet Estimator</title>
+<title>Estimateur de palettes</title>
 <style>
   :root { --bg:#0f1216; --card:#171c23; --ink:#e7edf3; --mut:#93a1b0; --acc:#4cc38a; --warn:#e0b341; --line:#263039; }
   * { box-sizing:border-box; }
@@ -35,32 +35,32 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>📦 Pallet Estimator</h1>
-  <p class="sub">Upload a job's <strong>BOM</strong> → get a pallet estimate (<strong>W × L × H</strong> + weight). The job is saved; when the real results come in, add the <code>.txt</code> to <em>close the loop</em> — and every closed job sharpens the next estimate.</p>
+  <h1>📦 Estimateur de palettes</h1>
+  <p class="sub">Téléversez le <strong>BOM</strong> d'un job → obtenez une estimation des palettes (<strong>Larg. × Long. × Haut.</strong> + poids). Le job est enregistré ; quand les vrais résultats arrivent, ajoutez le <code>.txt</code> pour <em>boucler la boucle</em> — et chaque job clôturé affine l'estimation suivante.</p>
 
   <div class="card">
     <div class="field">
-      <label for="job">Job name / number (optional)</label>
-      <input type="text" id="job" placeholder="e.g. Perce, MJQ, 186936" />
+      <label for="job">Nom / numéro du job (optionnel)</label>
+      <input type="text" id="job" placeholder="ex. Perce, MJQ, 186936" />
     </div>
     <div class="field">
       <label for="files">BOM (bill of materials) PDF</label>
       <input type="file" id="files" multiple accept="application/pdf" />
     </div>
     <div class="field">
-      <label for="ml">Notes (optional)</label>
-      <textarea id="ml" placeholder="Optional notes to go with the BOM."></textarea>
+      <label for="ml">Notes (optionnel)</label>
+      <textarea id="ml" placeholder="Notes optionnelles à joindre au BOM."></textarea>
     </div>
     <div class="row">
-      <button id="go">Estimate pallets</button>
+      <button id="go">Estimer les palettes</button>
       <span id="status" class="mut"></span>
     </div>
   </div>
 
   <div id="result" class="card hidden">
     <div class="row" style="gap:32px; align-items:flex-end">
-      <div><div class="mut">Pallets</div><div class="big" id="rCount">–</div></div>
-      <div><div class="mut">Total weight</div><div class="big" id="rWeight">–</div></div>
+      <div><div class="mut">Palettes</div><div class="big" id="rCount">–</div></div>
+      <div><div class="mut">Poids total</div><div class="big" id="rWeight">–</div></div>
       <div style="margin-left:auto" class="mut" id="rSaved"></div>
     </div>
     <table id="rTable"></table>
@@ -68,11 +68,11 @@
   </div>
 
   <div class="card">
-    <h2>Awaiting real results <span id="openCount" class="mut"></span></h2>
-    <div id="openList"><p class="mut">None.</p></div>
+    <h2>En attente des vrais résultats <span id="openCount" class="mut"></span></h2>
+    <div id="openList"><p class="mut">Aucun.</p></div>
 
-    <h2 style="margin-top:24px">Calibrating (closed) <span id="closedCount" class="mut"></span></h2>
-    <div id="closedList"><p class="mut">None yet — close a job to start calibrating.</p></div>
+    <h2 style="margin-top:24px">Calibration (clôturés) <span id="closedCount" class="mut"></span></h2>
+    <div id="closedList"><p class="mut">Aucun pour l'instant — clôturez un job pour démarrer la calibration.</p></div>
   </div>
 </div>
 
@@ -101,7 +101,7 @@ function renderPallets(el, pallets) {
   const rows = (pallets || [])
     .map((p, i) => `<tr><td>${i + 1}</td><td class="n">${esc(p.w)}"</td><td class="n">${esc(p.l)}"</td><td class="n">${esc(p.h)}"</td><td class="n">${esc(p.weight)} lb</td></tr>`)
     .join("");
-  el.innerHTML = rows ? `<tr><th>#</th><th class="n">W</th><th class="n">L</th><th class="n">H</th><th class="n">Weight</th></tr>${rows}` : "";
+  el.innerHTML = rows ? `<tr><th>#</th><th class="n">Larg.</th><th class="n">Long.</th><th class="n">Haut.</th><th class="n">Poids</th></tr>${rows}` : "";
 }
 
 async function estimate() {
@@ -110,20 +110,20 @@ async function estimate() {
   const materialList = $("ml").value.trim();
   if (!files.length && !materialList) return;
   $("go").disabled = true;
-  $("status").textContent = "Reading BOM…";
+  $("status").textContent = "Lecture du BOM…";
   $("status").className = "mut";
   try {
     const pdfs = await Promise.all(files.map(async (f) => ({ name: f.name, dataB64: await fileToB64(f) })));
-    $("status").textContent = "Estimating… (Opus reasons for ~10–30s)";
+    $("status").textContent = "Estimation… (Opus réfléchit ~10–30 s)";
     const r = await fetch(api("api/estimate"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobNo, materialList, pdfs }),
     });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error || "Request failed");
+    if (!r.ok) throw new Error(data.error || "Échec de la requête");
     $("rCount").textContent = data.palletCount ?? (data.pallets || []).length;
     $("rWeight").textContent = `${data.totalWeight ?? "?"} lb`;
-    $("rSaved").innerHTML = `saved as job <strong>${esc(data.jobNo)}</strong><br />add its real results below to calibrate`;
+    $("rSaved").innerHTML = `enregistré comme job <strong>${esc(data.jobNo)}</strong><br />ajoutez ses vrais résultats ci-dessous pour calibrer`;
     renderPallets($("rTable"), data.pallets);
     $("rReason").textContent = data.reasoning || "";
     $("result").classList.remove("hidden");
@@ -148,25 +148,25 @@ async function loadJobs() {
 
   $("openList").innerHTML = open.map((j) => {
     const est = j.estimate || {};
-    return `<details class="ex"><summary><strong>${esc(j.jobNo)}</strong> <span class="warn">— awaiting results</span>
-      <span class="mut">· est. ${esc(est.palletCount ?? "?")} pallets, ${esc(est.totalWeight ?? "?")} lb</span></summary>
+    return `<details class="ex"><summary><strong>${esc(j.jobNo)}</strong> <span class="warn">— en attente des résultats</span>
+      <span class="mut">· estim. ${esc(est.palletCount ?? "?")} palettes, ${esc(est.totalWeight ?? "?")} lb</span></summary>
       <div style="margin-top:10px">
-        <div class="field"><label>Real pallet list (.txt)</label><input type="file" id="txt-${j._id}" accept=".txt,text/plain" /></div>
-        <div class="field"><label>Accusés — material list PDFs (optional)</label><input type="file" id="acc-${j._id}" multiple accept="application/pdf" /></div>
-        <div class="row"><button data-close="${j._id}">Close job — add to calibration</button>
-          <button class="ghost" data-del="${j._id}">delete</button>
+        <div class="field"><label>Vraie liste de palettes (.txt)</label><input type="file" id="txt-${j._id}" accept=".txt,text/plain" /></div>
+        <div class="field"><label>Accusés — PDF de liste de matériel (optionnel)</label><input type="file" id="acc-${j._id}" multiple accept="application/pdf" /></div>
+        <div class="row"><button data-close="${j._id}">Clôturer le job — ajouter à la calibration</button>
+          <button class="ghost" data-del="${j._id}">supprimer</button>
           <span class="mut" id="cs-${j._id}"></span></div>
       </div></details>`;
-  }).join("") || `<p class="mut">None.</p>`;
+  }).join("") || `<p class="mut">Aucun.</p>`;
 
   $("closedList").innerHTML = closed.map((j) => {
     const a = j.actual || {}, e = j.estimate || {};
-    const cmp = (e.palletCount != null) ? ` <span class="mut">(est. was ${esc(e.palletCount)} / ${esc(e.totalWeight)} lb)</span>` : "";
+    const cmp = (e.palletCount != null) ? ` <span class="mut">(estim. était ${esc(e.palletCount)} / ${esc(e.totalWeight)} lb)</span>` : "";
     return `<div class="ex"><div class="row" style="justify-content:space-between">
-      <span><strong>${esc(j.jobNo)}</strong> <span class="mut">— ${esc(a.palletCount ?? "?")} pallets, ${esc(a.totalWeight ?? "?")} lb (real)</span>${cmp}</span>
-      <button class="ghost" data-del="${j._id}">delete</button></div>
+      <span><strong>${esc(j.jobNo)}</strong> <span class="mut">— ${esc(a.palletCount ?? "?")} palettes, ${esc(a.totalWeight ?? "?")} lb (réel)</span>${cmp}</span>
+      <button class="ghost" data-del="${j._id}">supprimer</button></div>
       ${a.note ? `<div class="mut" style="margin-top:4px">📝 ${esc(a.note)}</div>` : ""}</div>`;
-  }).join("") || `<p class="mut">None yet — close a job to start calibrating.</p>`;
+  }).join("") || `<p class="mut">Aucun pour l'instant — clôturez un job pour démarrer la calibration.</p>`;
 
   document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => closeJob(b.dataset.close)));
   document.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => delJob(b.dataset.del)));
@@ -174,8 +174,8 @@ async function loadJobs() {
 
 async function closeJob(id) {
   const txtInput = $(`txt-${id}`), accInput = $(`acc-${id}`), st = $(`cs-${id}`);
-  if (!txtInput || !txtInput.files.length) { if (st) { st.textContent = "select the .txt first"; st.className = "err"; } return; }
-  st.textContent = "Closing… (reconciling, ~10–30s)"; st.className = "mut";
+  if (!txtInput || !txtInput.files.length) { if (st) { st.textContent = "sélectionnez d'abord le .txt"; st.className = "err"; } return; }
+  st.textContent = "Clôture… (réconciliation, ~10–30 s)"; st.className = "mut";
   try {
     const skidText = await fileToText(txtInput.files[0]);
     const accuses = await Promise.all([...accInput.files].map(async (f) => ({ name: f.name, dataB64: await fileToB64(f) })));
@@ -184,7 +184,7 @@ async function closeJob(id) {
       body: JSON.stringify({ skidText, accuses }),
     });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error || "Close failed");
+    if (!r.ok) throw new Error(data.error || "Échec de la clôture");
     loadJobs();
   } catch (e) {
     st.textContent = e.message; st.className = "err";
@@ -192,7 +192,7 @@ async function closeJob(id) {
 }
 
 async function delJob(id) {
-  if (!confirm("Delete this job?")) return;
+  if (!confirm("Supprimer ce job ?")) return;
   await fetch(api(`api/jobs/${id}`), { method: "DELETE" });
   loadJobs();
 }
