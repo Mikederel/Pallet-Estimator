@@ -49,19 +49,24 @@ async function ingestJob(client, db, dir) {
   const job = path.basename(dir);
   const files = fs.readdirSync(dir);
   const txtFile = files.find((f) => f.toLowerCase().endsWith(".txt"));
-  const bomFile = files.find((f) => /(^|[^0-9])bom\.pdf$/i.test(f));
-  const accuseFiles = files.filter((f) => /\.(\d{2})\.pdf$/i.test(f)).sort();
+  const pdfs = files.filter((f) => f.toLowerCase().endsWith(".pdf"));
+  const bomFile = pdfs.find((f) => /(^|[^0-9])bom\.pdf$/i.test(f));
 
   if (!txtFile || !bomFile) {
     console.log(`[ingest] ${job}: skipped (need BOM.pdf and a .txt skid list)`);
     return 0;
   }
 
+  // Accusés = every PDF except the BOM. They may be named <job>.01.pdf,
+  // <job>.02.pdf, … or, for a single-shipment job, just <ordernumber>.pdf.
+  const accuseFiles = pdfs.filter((f) => f !== bomFile).sort();
   const bomText = await pdfText(path.join(dir, bomFile));
   const skidText = fs.readFileSync(path.join(dir, txtFile), "utf8");
-  const accuses = {};
+  const accuses = [];
   for (const f of accuseFiles) {
-    accuses[f.match(/\.(\d{2})\.pdf$/i)[1]] = await pdfText(path.join(dir, f));
+    const m = f.match(/\.(\d{2})\.pdf$/i);
+    const label = m ? `shipment .${m[1]}` : `shipment ${f.replace(/\.pdf$/i, "")}`;
+    accuses.push({ label, text: await pdfText(path.join(dir, f)) });
   }
 
   const prompt = `You are building a calibration example for pallet estimation. The model will later see ONLY a Bill of Materials (BOM) and must predict the pallets the whole job becomes.
@@ -82,7 +87,7 @@ ${bomText.slice(0, 16000)}
 ${skidText}
 
 == PER-SHIPMENT ACCUSÉS (material lists, optional context) ==
-${Object.entries(accuses).map(([s, t]) => `--- shipment .${s} ---\n${t.slice(0, 3000)}`).join("\n\n") || "(none provided)"}`;
+${accuses.map((a) => `--- ${a.label} ---\n${a.text.slice(0, 3000)}`).join("\n\n") || "(none provided)"}`;
 
   const resp = await client.messages.create({
     model: MODEL,
