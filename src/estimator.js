@@ -81,14 +81,14 @@ export async function estimatePallets({ jobNo, materialList, pdfs = [] } = {}) {
     output_config: { format: { type: "json_schema", schema: ESTIMATE_SCHEMA } },
   });
 
-  if (response.stop_reason === "refusal") throw new Error("The model declined to answer this request.");
+  if (response.stop_reason === "refusal") throw new Error("Le modèle a refusé de répondre à cette requête.");
   const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock) throw new Error(`No structured output returned (stop_reason: ${response.stop_reason}).`);
+  if (!textBlock) throw new Error(`Aucune sortie structurée renvoyée (stop_reason : ${response.stop_reason}).`);
   let result;
   try {
     result = JSON.parse(textBlock.text);
   } catch {
-    throw new Error("Model returned non-JSON output (try again, or the response was truncated).");
+    throw new Error("Le modèle a renvoyé une sortie non-JSON (réessayez, ou la réponse a été tronquée).");
   }
 
   // Extract BOM text now so the job can be closed later without re-uploading it.

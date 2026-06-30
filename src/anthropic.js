@@ -7,7 +7,7 @@ export async function getClient() {
   if (_client) return _client;
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key || key.includes("xxxx")) {
-    throw new Error("ANTHROPIC_API_KEY is not set in .env (get one at https://console.anthropic.com).");
+    throw new Error("ANTHROPIC_API_KEY n'est pas défini dans .env (obtenez-en une sur https://console.anthropic.com).");
   }
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   _client = new Anthropic();

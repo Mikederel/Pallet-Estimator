@@ -56,10 +56,10 @@ ${accuses.map((a) => `--- ${a.label} ---\n${(a.text || "").slice(0, 3000)}`).joi
     output_config: { format: { type: "json_schema", schema: JOB_SCHEMA } },
   });
 
-  if (resp.stop_reason === "refusal") throw new Error("The model declined to reconcile this job.");
+  if (resp.stop_reason === "refusal") throw new Error("Le modèle a refusé de réconcilier ce job.");
   const text = resp.content.find((b) => b.type === "text")?.text;
-  if (!text) throw new Error(`No reconciliation output (stop_reason: ${resp.stop_reason}).`);
+  if (!text) throw new Error(`Aucune sortie de réconciliation (stop_reason : ${resp.stop_reason}).`);
   const out = JSON.parse(text);
-  if (!Array.isArray(out.pallets) || !out.pallets.length) throw new Error("Reconciliation returned no pallets.");
+  if (!Array.isArray(out.pallets) || !out.pallets.length) throw new Error("La réconciliation n'a renvoyé aucune palette.");
   return out;
 }

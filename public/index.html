@@ -84,6 +84,26 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const BASE = location.pathname.replace(/\/+$/, "");
 const api = (p) => `${BASE}/${p}`;
 
+// Lit une réponse fetch en JSON, en gérant le cas où le serveur — ou un proxy
+// devant lui (nginx) — renvoie une page d'erreur HTML au lieu de JSON. Sans ça,
+// r.json() lève un cryptique « Unexpected token '<' » ; ici on en tire un
+// message clair (et on devine la cause d'après le code HTTP).
+async function readResult(r, fallback) {
+  const ct = r.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `${fallback} (HTTP ${r.status})`);
+    return data;
+  }
+  const body = await r.text().catch(() => "");
+  const title = (body.match(/<title>([^<]+)<\/title>/i) || [])[1];
+  let hint = "";
+  if (r.status === 413) hint = " — le PDF est trop volumineux pour le serveur (limite nginx client_max_body_size).";
+  else if (r.status === 504) hint = " — délai dépassé : l'estimation a pris trop de temps (proxy_read_timeout de nginx).";
+  else if (r.status === 502) hint = " — l'app ne répond pas (vérifier les logs PM2 du calendar).";
+  throw new Error(`Erreur serveur ${r.status}${title ? ` (${title.trim()})` : ""}.${hint}`);
+}
+
 const fileToB64 = (file) => new Promise((res, rej) => {
   const r = new FileReader();
   r.onload = () => res(String(r.result).split(",")[1]);
@@ -119,8 +139,7 @@ async function estimate() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobNo, materialList, pdfs }),
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || "Échec de la requête");
+    const data = await readResult(r, "Échec de la requête");
     $("rCount").textContent = data.palletCount ?? (data.pallets || []).length;
     $("rWeight").textContent = `${data.totalWeight ?? "?"} lb`;
     $("rSaved").innerHTML = `enregistré comme job <strong>${esc(data.jobNo)}</strong><br />ajoutez ses vrais résultats ci-dessous pour calibrer`;
@@ -183,8 +202,7 @@ async function closeJob(id) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ skidText, accuses }),
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || "Échec de la clôture");
+    const data = await readResult(r, "Échec de la clôture");
     loadJobs();
   } catch (e) {
     st.textContent = e.message; st.className = "err";
