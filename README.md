@@ -1,20 +1,41 @@
 # Pallet Estimator
 
-Estimate how many shipping pallets a material list needs. An Express API sends your
-material list to **Claude (Opus 4.8)** together with few-shot worked examples stored in
-MongoDB, and returns a structured estimate `{ pallets, reasoning, breakdown }`.
+Estimate how a whole job packs onto pallets/skids from its **Bill of Materials (BOM)** — the
+only document available at estimate time. An Express API sends the BOM PDF to **Claude (Opus 4.8)**
+with few-shot examples from real past jobs stored in MongoDB, and returns each pallet's
+approximate **`W × L × H`** + weight, plus the total:
+
+```json
+{ "totalWeight": 12345, "palletCount": 3,
+  "pallets": [ { "w": 47, "l": 104, "h": 60, "weight": 1300 } ],
+  "reasoning": "…" }
+```
 
 ## Stack
-Node.js (ESM) · Express · MongoDB · `@anthropic-ai/sdk` · PM2
+Node.js (ESM) · Express · MongoDB · `@anthropic-ai/sdk` · `pdf-parse` · PM2
 
 ## Setup
 ```bash
 npm install
 cp .env.example .env     # then put your ANTHROPIC_API_KEY in .env
-npm run seed             # optional: load sample few-shot examples
+npm run ingest           # load calibration examples from ./examples-data (see below)
 npm run dev              # http://localhost:3005
 ```
 Requires a local MongoDB (`mongodb://127.0.0.1:27017`) and an Anthropic API key.
+
+## Calibration examples (`npm run ingest`)
+Put one folder per past job under `examples-data/` (override with `EXAMPLES_DIR`):
+```
+examples-data/
+  186148/
+    186148.01.pdf … .NN.pdf   # material lists, one per shipment suffix
+    BOM.pdf                    # bill of materials (unit weights)
+    MJQ.txt                    # the skid list (ground truth: dims + weight per skid)
+```
+`npm run ingest` walks those folders and, per job, has Claude reconcile the BOM + accusés + skid
+list into a **closed** job (BOM → all the job's pallets, normalized to `W × L × H` + weight). It's
+**incremental** — already-loaded jobs are skipped (`--force` to re-process). The accusés are
+calibration-only; at estimate time just the BOM is used.
 
 ## Environment
 | var | purpose |
@@ -23,11 +44,18 @@ Requires a local MongoDB (`mongodb://127.0.0.1:27017`) and an Anthropic API key.
 | `MONGODB_URI` | Mongo connection (default `mongodb://127.0.0.1:27017`) |
 | `PORT` | HTTP port (set by PM2: 3004 prod / 3005 dev) |
 | `DB_NAME` | Mongo database (set by PM2: `pallet-estimator` / `pallet-estimator-dev`) |
+| `EXAMPLES_DIR` | Folder of example jobs for `npm run ingest` (default `./examples-data`) |
+
+## How it learns (the hub)
+Estimate a BOM → the job is saved as **open** (awaiting results). When the real pallets are
+known, upload the `.txt` (+ optional accusés) to **close** it — it becomes a calibration example
+and the next estimates improve. Bulk-seed past jobs with `npm run ingest`.
 
 ## API
-- `POST /api/estimate` — `{ materialList: string }` → `{ pallets, reasoning, breakdown }`
-- `GET /api/examples` · `POST /api/examples` · `DELETE /api/examples/:id` — manage few-shot examples
-- `GET /api/health`
+- `POST /api/estimate` — `{ pdfs:[{name,dataB64}], jobNo?, materialList? }` → `{ totalWeight, palletCount, pallets:[{w,l,h,weight}], reasoning, jobNo }` (saves an **open** job)
+- `GET /api/jobs` — list jobs (open = awaiting results, closed = calibrating)
+- `POST /api/jobs/:id/close` — `{ skidText, accuses?:[{name,dataB64}] }` → reconciles the real results into a calibration example
+- `DELETE /api/jobs/:id` · `GET /api/health`
 
 ## Deploy (PM2)
 ```bash

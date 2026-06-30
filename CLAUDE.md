@@ -39,8 +39,8 @@ pm2 start ecosystem.dev.config.cjs
 # Logs
 pm2 logs pallet-estimator-dev
 
-# Charger les exemples few-shot dans Mongo
-npm run seed
+# Charger les exemples de calibration depuis ./examples-data (un dossier par job)
+npm run ingest
 ```
 💡 Après chaque `pm2 start` / `restart` : **`pm2 save`** (persiste la liste des processus pour survie au reboot). À faire dev ET prod.
 
@@ -98,7 +98,7 @@ pm2 restart pallet-estimator && pm2 save
 ```
 
 ## 6. Sauvegarde base de données
-Claude doit STOPPER et demander un backup si le changement : ajoute/renomme/supprime un champ dans `examples` ou `estimations`, change le format de stockage, ou migre des documents existants.
+Claude doit STOPPER et demander un backup si le changement : ajoute/renomme/supprime un champ dans la collection `jobs` (le hub), change le format de stockage, ou migre des documents existants.
 ```bash
 # Dev
 mongodump --db pallet-estimator-dev --out ~/backups/$(date +%Y%m%d-%H%M%S)-dev
@@ -121,9 +121,9 @@ curl localhost:3005/api/health
 ```
 
 ## 9. Stack technique (où est quoi)
-- **Express (ESM)** — `src/server.js` (routes `/api/estimate`, `/api/examples`, `/api/health`)
-- **MongoDB** (driver `mongodb`) — `src/db.js` ; collections `examples` (few-shot) + `estimations` (historique)
-- **Claude** via `@anthropic-ai/sdk` — `src/estimator.js` : modèle `claude-opus-4-8`, sortie structurée Zod, thinking adaptatif, prompt few-shot mis en cache (`cache_control`)
+- **Express (ESM)** — `src/server.js` (routes `/api/estimate`, `/api/jobs`, `/api/jobs/:id/close`, `/api/health`)
+- **MongoDB** (driver `mongodb`) — `src/db.js` ; collection `jobs` (le hub : BOM + estimé → résultats réels ; les jobs `closed` servent de few-shot)
+- **Claude** via `@anthropic-ai/sdk` — `src/estimator.js` (estimé depuis le BOM) + `src/reconcile.js` (résultats réels → exemple) + `src/pdf.js` (extraction PDF) + `src/anthropic.js` (client) ; modèle `claude-opus-4-8`, sortie structurée (JSON schema), thinking adaptatif, few-shot mis en cache (`cache_control`)
 - **Prompt few-shot** — `src/prompt.js`
 - **Frontend statique** — `public/index.html`
 - **PM2** — `ecosystem.config.cjs` (prod :3004) / `ecosystem.dev.config.cjs` (dev :3005)

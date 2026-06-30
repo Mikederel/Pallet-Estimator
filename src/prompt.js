@@ -1,44 +1,41 @@
-// Builds the few-shot system prompt for the pallet estimator from stored examples.
+// Builds the few-shot system prompt. Each example is a real past job:
+// its Bill of Materials (BOM) -> the pallets the whole job actually became
+// (W x L x H inches + weight lb). At estimate time the BOM is the only input.
 
-function formatMaterials(materials = []) {
-  return materials
-    .map((m) => {
-      const dims = [m.length, m.width, m.height].filter((v) => v != null).join(" x ");
-      const parts = [
-        `- ${m.name ?? "item"}`,
-        m.quantity != null ? `qty ${m.quantity}` : null,
-        dims ? `dims ${dims}` : null,
-        m.weight != null ? `weight ${m.weight}` : null,
-      ].filter(Boolean);
-      return parts.join(", ");
-    })
+export const DIM_RULES = `Report every pallet/skid as W x L x H in inches:
+- W (width) comes first, and is normally <= 48".
+- L (length) is the long side, normally <= 145".
+- H (height) is the vertical, and should fit a 53' trailer — aim for <= 68".
+Weights are in pounds (lb).`;
+
+function formatPallets(pallets = []) {
+  return pallets
+    .map((p, i) => `  - Pallet ${i + 1}: ${p.w}" W x ${p.l}" L x ${p.h}" H — ${p.weight} lb`)
     .join("\n");
 }
 
-// An example may be structured (materials[]) or free text (rawText).
-function formatExampleBody(ex) {
-  if (Array.isArray(ex.materials) && ex.materials.length) return formatMaterials(ex.materials);
-  return (ex.rawText || "").trim();
-}
-
 export function buildSystemPrompt(examples = []) {
-  const header = `You are a logistics expert who estimates how many shipping pallets a material list requires.
+  const usable = examples.filter((e) => Array.isArray(e.pallets) && e.pallets.length);
 
-Reason about: item dimensions, quantities, weight, stackability, and how items combine onto a standard pallet (1200x800mm / 48x40in, ~1.8m max stack height, ~1000kg max weight) unless an example implies a different convention. Respect the units given in the input.
+  const header = `You are a logistics expert. From a job's Bill of Materials (BOM) — the only document available at estimate time — estimate how the WHOLE job will be packed onto pallets/skids.
 
-Use the worked examples below to calibrate your estimates. Always answer through the provided JSON schema: a whole number of pallets, a concise reasoning, and a per-group breakdown.`;
+${DIM_RULES}
 
-  if (!examples.length) {
-    return `${header}\n\n(No worked examples are available yet — estimate from first principles.)`;
+The BOM lists every product code, quantity, and unit weight for the job. Estimate the complete set of pallets the job will require: group items sensibly, respect the size limits above (split long rail/track runs, keep heavy items low, combine small parts), and give each pallet an approximate W x L x H and weight, plus the total weight. Calibrate dimensions, grouping, and weights against the worked examples below — each is a real past BOM and the pallets it actually became. Answer ONLY through the provided JSON schema.`;
+
+  if (!usable.length) {
+    return `${header}\n\n(No worked examples yet — estimate from first principles.)`;
   }
 
-  const blocks = examples
-    .map((ex, i) => {
-      const body = formatExampleBody(ex);
-      return `### Example ${i + 1}
-Material list:
-${body}
-${ex.notes ? `Notes: ${ex.notes}\n` : ""}=> Pallets: ${ex.pallets}`;
+  const blocks = usable
+    .map((e, i) => {
+      const note = e.note ? `\n(${String(e.note).trim()})` : "";
+      return `### Example ${i + 1} (job ${e.job ?? "?"})
+BOM (summary):
+${(e.bomSummary || "").trim()}
+
+Resulting pallets (${e.palletCount ?? e.pallets.length}, total ${e.totalWeight ?? "?"} lb):
+${formatPallets(e.pallets)}${note}`;
     })
     .join("\n\n");
 

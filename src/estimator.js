@@ -1,80 +1,118 @@
-import { z } from "zod";
-import { buildSystemPrompt } from "./prompt.js";
+import { buildSystemPrompt, DIM_RULES } from "./prompt.js";
 import { collections } from "./db.js";
+import { getClient, MODEL } from "./anthropic.js";
+import { pdfTextFromBase64 } from "./pdf.js";
 
-const MODEL = "claude-opus-4-8";
+// Raw JSON Schema (no zod helper — it is coupled to the Zod major version).
+const PALLET = {
+  type: "object",
+  properties: {
+    w: { type: "number", description: "Width in inches (typically <= 48)" },
+    l: { type: "number", description: "Length in inches (long side, <= ~145)" },
+    h: { type: "number", description: "Height in inches (aim <= 68)" },
+    weight: { type: "number", description: "Approximate weight in lb" },
+  },
+  required: ["w", "l", "h", "weight"],
+  additionalProperties: false,
+};
 
-const EstimateSchema = z.object({
-  pallets: z.number().describe("Total whole number of pallets required"),
-  reasoning: z.string().describe("Concise explanation of how the estimate was reached"),
-  breakdown: z
-    .array(
-      z.object({
-        group: z.string().describe("Item or group of items"),
-        pallets: z.number().describe("Pallets attributed to this group"),
-      })
-    )
-    .describe("Per-group pallet breakdown"),
-});
+const ESTIMATE_SCHEMA = {
+  type: "object",
+  properties: {
+    totalWeight: { type: "number", description: "Total weight of all pallets, lb" },
+    palletCount: { type: "number" },
+    pallets: { type: "array", items: PALLET, description: "Each pallet's approx W x L x H (in) + weight (lb)" },
+    reasoning: { type: "string", description: "Concise explanation of the grouping and estimate" },
+  },
+  required: ["totalWeight", "palletCount", "pallets", "reasoning"],
+  additionalProperties: false,
+};
 
-// The Anthropic SDK is loaded lazily so that a missing key or an SDK/runtime
-// issue surfaces on /api/estimate only — it never prevents the server from
-// booting and serving the UI, examples, and /api/health.
-let _client;
-let _zodOutputFormat;
-
-async function getClient() {
-  if (_client) return _client;
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key || key.includes("xxxx")) {
-    throw new Error("ANTHROPIC_API_KEY is not set in .env (get one at https://console.anthropic.com).");
-  }
-  const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  ({ zodOutputFormat: _zodOutputFormat } = await import("@anthropic-ai/sdk/helpers/zod"));
-  _client = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
-  return _client;
+// Closed jobs are the calibration set: their BOM summary -> the pallets they
+// actually became.
+async function closedExamples() {
+  const closed = await collections
+    .jobs()
+    .find({ status: "closed", "actual.pallets": { $type: "array" } })
+    .toArray();
+  return closed.map((j) => ({
+    job: j.jobNo,
+    bomSummary: j.bomSummary,
+    pallets: j.actual.pallets,
+    palletCount: j.actual.palletCount,
+    totalWeight: j.actual.totalWeight,
+    note: j.actual.note,
+  }));
 }
 
-export async function estimatePallets(materialList) {
-  const examples = await collections.examples().find().toArray();
+// input: { jobNo?: string, materialList?: string, pdfs?: [{ name, dataB64 }] }
+// pdfs[0] is treated as the BOM. Persists the job as "open" (awaiting results).
+export async function estimatePallets({ jobNo, materialList, pdfs = [] } = {}) {
+  const examples = await closedExamples();
   const client = await getClient();
 
-  const response = await client.messages.parse({
-    model: MODEL,
-    max_tokens: 8000,
-    thinking: { type: "adaptive" }, // numeric/spatial reasoning for the estimate
-    system: [
-      {
-        type: "text",
-        text: buildSystemPrompt(examples),
-        cache_control: { type: "ephemeral" }, // few-shot prefix is reused across requests
-      },
-    ],
-    messages: [
-      {
-        role: "user",
-        content: `Estimate the number of pallets for this material list:\n\n${materialList}`,
-      },
-    ],
-    output_config: { format: _zodOutputFormat(EstimateSchema) },
+  const content = [
+    {
+      type: "text",
+      text: "Here is the Bill of Materials (BOM) for a job — the full list of products, quantities, and unit weights. This is the only document available now (the per-shipment accusés come later); estimate from the BOM alone.",
+    },
+  ];
+  for (const f of pdfs) {
+    content.push({
+      type: "document",
+      source: { type: "base64", media_type: "application/pdf", data: f.dataB64 },
+      title: f.name || "document.pdf",
+    });
+  }
+  if (materialList && materialList.trim()) {
+    content.push({ type: "text", text: `Additional pasted notes:\n${materialList.trim()}` });
+  }
+  content.push({
+    type: "text",
+    text: `Estimate the complete set of pallets this whole job will require. ${DIM_RULES}\nReturn each pallet's W x L x H and approximate weight, plus the total weight.`,
   });
 
-  const result = response.parsed_output;
-  if (!result) {
-    throw new Error("Model did not return a valid structured estimate (possible refusal or truncation).");
-  }
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    system: [{ type: "text", text: buildSystemPrompt(examples), cache_control: { type: "ephemeral" } }],
+    messages: [{ role: "user", content }],
+    output_config: { format: { type: "json_schema", schema: ESTIMATE_SCHEMA } },
+  });
 
-  // Log the estimation for later review / tuning (best-effort, non-blocking).
+  if (response.stop_reason === "refusal") throw new Error("The model declined to answer this request.");
+  const textBlock = response.content.find((b) => b.type === "text");
+  if (!textBlock) throw new Error(`No structured output returned (stop_reason: ${response.stop_reason}).`);
+  let result;
   try {
-    await collections.estimations().insertOne({
-      input: materialList,
-      result,
-      model: MODEL,
-      createdAt: new Date(),
-    });
-  } catch (err) {
-    console.error("[estimator] failed to log estimation:", err.message);
+    result = JSON.parse(textBlock.text);
+  } catch {
+    throw new Error("Model returned non-JSON output (try again, or the response was truncated).");
   }
 
-  return result;
+  // Extract BOM text now so the job can be closed later without re-uploading it.
+  let bomText = "";
+  if (pdfs[0]?.dataB64) {
+    try {
+      bomText = await pdfTextFromBase64(pdfs[0].dataB64);
+    } catch (e) {
+      console.error("[estimate] BOM text extraction failed:", e.message);
+    }
+  }
+
+  // Persist as an OPEN job (awaiting real results). Keyed by jobNo so re-estimating
+  // the same job updates it; never downgrades a closed job back to open.
+  const label = (jobNo && jobNo.trim()) || (pdfs[0]?.name || "").replace(/\.pdf$/i, "") || `job-${Date.now()}`;
+  const now = new Date();
+  await collections.jobs().updateOne(
+    { jobNo: label },
+    {
+      $set: { jobNo: label, bomText, estimate: result, estimatedAt: now, updatedAt: now },
+      $setOnInsert: { status: "open", createdAt: now },
+    },
+    { upsert: true }
+  );
+
+  return { ...result, jobNo: label };
 }

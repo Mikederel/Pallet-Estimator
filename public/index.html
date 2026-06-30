@@ -5,133 +5,196 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Pallet Estimator</title>
 <style>
-  :root { --bg:#0f1216; --card:#171c23; --ink:#e7edf3; --mut:#93a1b0; --acc:#4cc38a; --line:#263039; }
+  :root { --bg:#0f1216; --card:#171c23; --ink:#e7edf3; --mut:#93a1b0; --acc:#4cc38a; --warn:#e0b341; --line:#263039; }
   * { box-sizing:border-box; }
   body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
-  .wrap { max-width:820px; margin:0 auto; padding:32px 20px 64px; }
-  h1 { margin:0 0 4px; font-size:24px; }
+  .wrap { max-width:880px; margin:0 auto; padding:32px 20px 64px; }
+  h1 { margin:0 0 4px; font-size:24px; } h2 { font-size:15px; margin:18px 0 6px; color:var(--mut); text-transform:uppercase; letter-spacing:.04em; }
   p.sub { margin:0 0 24px; color:var(--mut); }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:20px; }
-  label { display:block; font-weight:600; margin-bottom:8px; }
+  label { display:block; font-weight:600; margin:0 0 6px; }
   textarea, input { width:100%; background:#0c0f13; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font:inherit; }
-  textarea { min-height:140px; resize:vertical; }
-  button { background:var(--acc); color:#04130c; border:0; border-radius:8px; padding:10px 18px; font:inherit; font-weight:700; cursor:pointer; }
+  textarea { min-height:70px; resize:vertical; }
+  input[type=file] { padding:12px; }
+  button { background:var(--acc); color:#04130c; border:0; border-radius:8px; padding:10px 16px; font:inherit; font-weight:700; cursor:pointer; }
   button.ghost { background:transparent; color:var(--mut); border:1px solid var(--line); font-weight:600; }
   button:disabled { opacity:.5; cursor:default; }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .pallets { font-size:40px; font-weight:800; color:var(--acc); }
-  table { width:100%; border-collapse:collapse; margin-top:10px; }
-  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  .field { margin-bottom:12px; }
+  .big { font-size:32px; font-weight:800; color:var(--acc); }
+  table { width:100%; border-collapse:collapse; margin-top:12px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
   th { color:var(--mut); font-weight:600; font-size:13px; }
-  .mut { color:var(--mut); }
-  details summary { cursor:pointer; font-weight:600; }
-  .ex { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; }
-  .err { color:#ff6b6b; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .mut { color:var(--mut); } .warn { color:var(--warn); } .err { color:#ff6b6b; }
+  .ex { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:8px; }
+  details.ex summary { cursor:pointer; font-weight:600; list-style:none; }
   .hidden { display:none; }
-  hr { border:0; border-top:1px solid var(--line); }
+  code { background:#0c0f13; padding:1px 5px; border-radius:4px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>📦 Pallet Estimator</h1>
-  <p class="sub">Paste a material list (with dimensions / quantities). Claude estimates the pallets needed, calibrated on your saved examples.</p>
+  <p class="sub">Upload a job's <strong>BOM</strong> → get a pallet estimate (<strong>W × L × H</strong> + weight). The job is saved; when the real results come in, add the <code>.txt</code> to <em>close the loop</em> — and every closed job sharpens the next estimate.</p>
 
   <div class="card">
-    <label for="ml">Material list</label>
-    <textarea id="ml" placeholder="e.g.&#10;40x Carton A — 600x400x300mm, 12kg&#10;20x Carton B — 800x600x400mm, 25kg&#10;8x Drum 200L — 600x600x900mm, 210kg"></textarea>
-    <div class="row" style="margin-top:12px">
+    <div class="field">
+      <label for="job">Job name / number (optional)</label>
+      <input type="text" id="job" placeholder="e.g. Perce, MJQ, 186936" />
+    </div>
+    <div class="field">
+      <label for="files">BOM (bill of materials) PDF</label>
+      <input type="file" id="files" multiple accept="application/pdf" />
+    </div>
+    <div class="field">
+      <label for="ml">Notes (optional)</label>
+      <textarea id="ml" placeholder="Optional notes to go with the BOM."></textarea>
+    </div>
+    <div class="row">
       <button id="go">Estimate pallets</button>
       <span id="status" class="mut"></span>
     </div>
   </div>
 
   <div id="result" class="card hidden">
-    <div class="mut">Estimated pallets</div>
-    <div class="pallets" id="rp">–</div>
-    <p id="rr" class="mut"></p>
-    <table id="rb"></table>
+    <div class="row" style="gap:32px; align-items:flex-end">
+      <div><div class="mut">Pallets</div><div class="big" id="rCount">–</div></div>
+      <div><div class="mut">Total weight</div><div class="big" id="rWeight">–</div></div>
+      <div style="margin-left:auto" class="mut" id="rSaved"></div>
+    </div>
+    <table id="rTable"></table>
+    <p id="rReason" class="mut" style="margin-top:14px"></p>
   </div>
 
   <div class="card">
-    <details>
-      <summary>Worked examples (few-shot) — <span id="exCount" class="mut">0</span></summary>
-      <div id="exList"></div>
-      <hr style="margin:16px 0" />
-      <label for="exText">Add an example — material list (free text)</label>
-      <textarea id="exText" placeholder="Material list for a known pallet count..."></textarea>
-      <div class="row" style="margin-top:10px">
-        <input type="number" id="exPallets" placeholder="pallets" style="width:110px" />
-        <input type="text" id="exNotes" placeholder="notes (optional)" style="flex:1" />
-        <button class="ghost" id="exAdd">Add</button>
-      </div>
-    </details>
+    <h2>Awaiting real results <span id="openCount" class="mut"></span></h2>
+    <div id="openList"><p class="mut">None.</p></div>
+
+    <h2 style="margin-top:24px">Calibrating (closed) <span id="closedCount" class="mut"></span></h2>
+    <div id="closedList"><p class="mut">None yet — close a job to start calibrating.</p></div>
   </div>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const fileToB64 = (file) => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(String(r.result).split(",")[1]);
+  r.onerror = rej;
+  r.readAsDataURL(file);
+});
+const fileToText = (file) => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(String(r.result));
+  r.onerror = rej;
+  r.readAsText(file);
+});
+
+function renderPallets(el, pallets) {
+  const rows = (pallets || [])
+    .map((p, i) => `<tr><td>${i + 1}</td><td class="n">${esc(p.w)}"</td><td class="n">${esc(p.l)}"</td><td class="n">${esc(p.h)}"</td><td class="n">${esc(p.weight)} lb</td></tr>`)
+    .join("");
+  el.innerHTML = rows ? `<tr><th>#</th><th class="n">W</th><th class="n">L</th><th class="n">H</th><th class="n">Weight</th></tr>${rows}` : "";
+}
 
 async function estimate() {
+  const files = [...$("files").files];
+  const jobNo = $("job").value.trim();
   const materialList = $("ml").value.trim();
-  if (!materialList) return;
-  $("go").disabled = true; $("status").textContent = "Estimating…"; $("status").className = "mut";
+  if (!files.length && !materialList) return;
+  $("go").disabled = true;
+  $("status").textContent = "Reading BOM…";
+  $("status").className = "mut";
   try {
+    const pdfs = await Promise.all(files.map(async (f) => ({ name: f.name, dataB64: await fileToB64(f) })));
+    $("status").textContent = "Estimating… (Opus reasons for ~10–30s)";
     const r = await fetch("/api/estimate", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ materialList }),
+      body: JSON.stringify({ jobNo, materialList, pdfs }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || "Request failed");
-    $("rp").textContent = data.pallets;
-    $("rr").textContent = data.reasoning || "";
-    const rows = (data.breakdown || []).map((b) => `<tr><td>${esc(b.group)}</td><td>${esc(b.pallets)}</td></tr>`).join("");
-    $("rb").innerHTML = rows ? `<tr><th>Group</th><th>Pallets</th></tr>${rows}` : "";
+    $("rCount").textContent = data.palletCount ?? (data.pallets || []).length;
+    $("rWeight").textContent = `${data.totalWeight ?? "?"} lb`;
+    $("rSaved").innerHTML = `saved as job <strong>${esc(data.jobNo)}</strong><br />add its real results below to calibrate`;
+    renderPallets($("rTable"), data.pallets);
+    $("rReason").textContent = data.reasoning || "";
     $("result").classList.remove("hidden");
     $("status").textContent = "";
+    $("files").value = ""; $("ml").value = ""; $("job").value = "";
+    loadJobs();
   } catch (e) {
-    $("status").textContent = e.message; $("status").className = "err";
+    $("status").textContent = e.message;
+    $("status").className = "err";
   } finally {
     $("go").disabled = false;
   }
 }
 
-async function loadExamples() {
-  const r = await fetch("/api/examples");
-  const list = await r.json();
-  $("exCount").textContent = list.length;
-  $("exList").innerHTML = list.map((ex) => {
-    const body = ex.rawText || (ex.materials || []).map((m) => m.name).join(", ");
+async function loadJobs() {
+  let jobs = [];
+  try { jobs = await (await fetch("/api/jobs")).json(); } catch { return; }
+  const open = jobs.filter((j) => j.status !== "closed");
+  const closed = jobs.filter((j) => j.status === "closed");
+  $("openCount").textContent = open.length ? `(${open.length})` : "";
+  $("closedCount").textContent = closed.length ? `(${closed.length})` : "";
+
+  $("openList").innerHTML = open.map((j) => {
+    const est = j.estimate || {};
+    return `<details class="ex"><summary><strong>${esc(j.jobNo)}</strong> <span class="warn">— awaiting results</span>
+      <span class="mut">· est. ${esc(est.palletCount ?? "?")} pallets, ${esc(est.totalWeight ?? "?")} lb</span></summary>
+      <div style="margin-top:10px">
+        <div class="field"><label>Real pallet list (.txt)</label><input type="file" id="txt-${j._id}" accept=".txt,text/plain" /></div>
+        <div class="field"><label>Accusés — material list PDFs (optional)</label><input type="file" id="acc-${j._id}" multiple accept="application/pdf" /></div>
+        <div class="row"><button data-close="${j._id}">Close job — add to calibration</button>
+          <button class="ghost" data-del="${j._id}">delete</button>
+          <span class="mut" id="cs-${j._id}"></span></div>
+      </div></details>`;
+  }).join("") || `<p class="mut">None.</p>`;
+
+  $("closedList").innerHTML = closed.map((j) => {
+    const a = j.actual || {}, e = j.estimate || {};
+    const cmp = (e.palletCount != null) ? ` <span class="mut">(est. was ${esc(e.palletCount)} / ${esc(e.totalWeight)} lb)</span>` : "";
     return `<div class="ex"><div class="row" style="justify-content:space-between">
-      <strong>${esc(ex.pallets)} pallet(s)</strong>
-      <button class="ghost" data-del="${ex._id}">delete</button></div>
-      <div class="mut" style="margin-top:6px">${esc(body)}</div>
-      ${ex.notes ? `<div class="mut" style="margin-top:4px">📝 ${esc(ex.notes)}</div>` : ""}</div>`;
-  }).join("") || `<p class="mut">No examples yet.</p>`;
-  document.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => delExample(b.dataset.del)));
+      <span><strong>${esc(j.jobNo)}</strong> <span class="mut">— ${esc(a.palletCount ?? "?")} pallets, ${esc(a.totalWeight ?? "?")} lb (real)</span>${cmp}</span>
+      <button class="ghost" data-del="${j._id}">delete</button></div>
+      ${a.note ? `<div class="mut" style="margin-top:4px">📝 ${esc(a.note)}</div>` : ""}</div>`;
+  }).join("") || `<p class="mut">None yet — close a job to start calibrating.</p>`;
+
+  document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => closeJob(b.dataset.close)));
+  document.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => delJob(b.dataset.del)));
 }
 
-async function addExample() {
-  const rawText = $("exText").value.trim();
-  const pallets = Number($("exPallets").value);
-  const notes = $("exNotes").value.trim();
-  if (!rawText || !Number.isFinite(pallets)) return;
-  await fetch("/api/examples", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rawText, pallets, notes }),
-  });
-  $("exText").value = ""; $("exPallets").value = ""; $("exNotes").value = "";
-  loadExamples();
+async function closeJob(id) {
+  const txtInput = $(`txt-${id}`), accInput = $(`acc-${id}`), st = $(`cs-${id}`);
+  if (!txtInput || !txtInput.files.length) { if (st) { st.textContent = "select the .txt first"; st.className = "err"; } return; }
+  st.textContent = "Closing… (reconciling, ~10–30s)"; st.className = "mut";
+  try {
+    const skidText = await fileToText(txtInput.files[0]);
+    const accuses = await Promise.all([...accInput.files].map(async (f) => ({ name: f.name, dataB64: await fileToB64(f) })));
+    const r = await fetch(`/api/jobs/${id}/close`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skidText, accuses }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Close failed");
+    loadJobs();
+  } catch (e) {
+    st.textContent = e.message; st.className = "err";
+  }
 }
 
-async function delExample(id) {
-  await fetch(`/api/examples/${id}`, { method: "DELETE" });
-  loadExamples();
+async function delJob(id) {
+  if (!confirm("Delete this job?")) return;
+  await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+  loadJobs();
 }
 
 $("go").onclick = estimate;
-$("exAdd").onclick = addExample;
-loadExamples();
+loadJobs();
 </script>
 </body>
 </html>

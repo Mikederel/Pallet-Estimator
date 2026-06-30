@@ -21,6 +21,8 @@ export function getDB() {
 }
 
 export const collections = {
-  examples: () => getDB().collection("examples"),
+  // jobs is the hub: each job is estimated from a BOM (status "open") and later
+  // closed with its real pallet results (status "closed" → becomes calibration).
+  jobs: () => getDB().collection("jobs"),
   estimations: () => getDB().collection("estimations"),
 };
