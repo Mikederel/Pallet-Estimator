@@ -1,7 +1,7 @@
 import { buildSystemPrompt, DIM_RULES } from "./prompt.js";
 import { collections } from "./db.js";
-
-const MODEL = "claude-opus-4-8";
+import { getClient, MODEL } from "./anthropic.js";
+import { pdfTextFromBase64 } from "./pdf.js";
 
 // Raw JSON Schema (no zod helper — it is coupled to the Zod major version).
 const PALLET = {
@@ -28,23 +28,27 @@ const ESTIMATE_SCHEMA = {
   additionalProperties: false,
 };
 
-// Lazy SDK load so the server boots even without the key / SDK.
-let _client;
-async function getClient() {
-  if (_client) return _client;
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key || key.includes("xxxx")) {
-    throw new Error("ANTHROPIC_API_KEY is not set in .env (get one at https://console.anthropic.com).");
-  }
-  const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  _client = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
-  return _client;
+// Closed jobs are the calibration set: their BOM summary -> the pallets they
+// actually became.
+async function closedExamples() {
+  const closed = await collections
+    .jobs()
+    .find({ status: "closed", "actual.pallets": { $type: "array" } })
+    .toArray();
+  return closed.map((j) => ({
+    job: j.jobNo,
+    bomSummary: j.bomSummary,
+    pallets: j.actual.pallets,
+    palletCount: j.actual.palletCount,
+    totalWeight: j.actual.totalWeight,
+    note: j.actual.note,
+  }));
 }
 
-// input: { materialList?: string, pdfs?: [{ name, dataB64 }] }
-// At estimate time the BOM PDF is the expected input.
-export async function estimatePallets({ materialList, pdfs = [] } = {}) {
-  const examples = await collections.examples().find({ pallets: { $type: "array" } }).toArray();
+// input: { jobNo?: string, materialList?: string, pdfs?: [{ name, dataB64 }] }
+// pdfs[0] is treated as the BOM. Persists the job as "open" (awaiting results).
+export async function estimatePallets({ jobNo, materialList, pdfs = [] } = {}) {
+  const examples = await closedExamples();
   const client = await getClient();
 
   const content = [
@@ -61,7 +65,7 @@ export async function estimatePallets({ materialList, pdfs = [] } = {}) {
     });
   }
   if (materialList && materialList.trim()) {
-    content.push({ type: "text", text: `Additional pasted notes / material list:\n${materialList.trim()}` });
+    content.push({ type: "text", text: `Additional pasted notes:\n${materialList.trim()}` });
   }
   content.push({
     type: "text",
@@ -72,20 +76,14 @@ export async function estimatePallets({ materialList, pdfs = [] } = {}) {
     model: MODEL,
     max_tokens: 16000,
     thinking: { type: "adaptive" },
-    system: [
-      { type: "text", text: buildSystemPrompt(examples), cache_control: { type: "ephemeral" } },
-    ],
+    system: [{ type: "text", text: buildSystemPrompt(examples), cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content }],
     output_config: { format: { type: "json_schema", schema: ESTIMATE_SCHEMA } },
   });
 
-  if (response.stop_reason === "refusal") {
-    throw new Error("The model declined to answer this request.");
-  }
+  if (response.stop_reason === "refusal") throw new Error("The model declined to answer this request.");
   const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock) {
-    throw new Error(`No structured output returned (stop_reason: ${response.stop_reason}).`);
-  }
+  if (!textBlock) throw new Error(`No structured output returned (stop_reason: ${response.stop_reason}).`);
   let result;
   try {
     result = JSON.parse(textBlock.text);
@@ -93,17 +91,28 @@ export async function estimatePallets({ materialList, pdfs = [] } = {}) {
     throw new Error("Model returned non-JSON output (try again, or the response was truncated).");
   }
 
-  try {
-    await collections.estimations().insertOne({
-      input: materialList || null,
-      pdfNames: pdfs.map((f) => f.name).filter(Boolean),
-      result,
-      model: MODEL,
-      createdAt: new Date(),
-    });
-  } catch (err) {
-    console.error("[estimator] failed to log estimation:", err.message);
+  // Extract BOM text now so the job can be closed later without re-uploading it.
+  let bomText = "";
+  if (pdfs[0]?.dataB64) {
+    try {
+      bomText = await pdfTextFromBase64(pdfs[0].dataB64);
+    } catch (e) {
+      console.error("[estimate] BOM text extraction failed:", e.message);
+    }
   }
 
-  return result;
+  // Persist as an OPEN job (awaiting real results). Keyed by jobNo so re-estimating
+  // the same job updates it; never downgrades a closed job back to open.
+  const label = (jobNo && jobNo.trim()) || (pdfs[0]?.name || "").replace(/\.pdf$/i, "") || `job-${Date.now()}`;
+  const now = new Date();
+  await collections.jobs().updateOne(
+    { jobNo: label },
+    {
+      $set: { jobNo: label, bomText, estimate: result, estimatedAt: now, updatedAt: now },
+      $setOnInsert: { status: "open", createdAt: now },
+    },
+    { upsert: true }
+  );
+
+  return { ...result, jobNo: label };
 }

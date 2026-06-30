@@ -33,8 +33,9 @@ examples-data/
     MJQ.txt                    # the skid list (ground truth: dims + weight per skid)
 ```
 `npm run ingest` walks those folders and, per job, has Claude reconcile the BOM + accusés + skid
-list into one example (BOM → all the job's pallets, normalized to `W × L × H` + weight). The
-accusés (`.NN.pdf`) are calibration-only — at estimate time just the BOM is used.
+list into a **closed** job (BOM → all the job's pallets, normalized to `W × L × H` + weight). It's
+**incremental** — already-loaded jobs are skipped (`--force` to re-process). The accusés are
+calibration-only; at estimate time just the BOM is used.
 
 ## Environment
 | var | purpose |
@@ -45,10 +46,16 @@ accusés (`.NN.pdf`) are calibration-only — at estimate time just the BOM is u
 | `DB_NAME` | Mongo database (set by PM2: `pallet-estimator` / `pallet-estimator-dev`) |
 | `EXAMPLES_DIR` | Folder of example jobs for `npm run ingest` (default `./examples-data`) |
 
+## How it learns (the hub)
+Estimate a BOM → the job is saved as **open** (awaiting results). When the real pallets are
+known, upload the `.txt` (+ optional accusés) to **close** it — it becomes a calibration example
+and the next estimates improve. Bulk-seed past jobs with `npm run ingest`.
+
 ## API
-- `POST /api/estimate` — `{ pdfs: [{name, dataB64}], materialList?: string }` → `{ totalWeight, palletCount, pallets:[{w,l,h,weight}], reasoning }`
-- `GET /api/examples` · `DELETE /api/examples/:id` — list / remove calibration examples
-- `GET /api/health`
+- `POST /api/estimate` — `{ pdfs:[{name,dataB64}], jobNo?, materialList? }` → `{ totalWeight, palletCount, pallets:[{w,l,h,weight}], reasoning, jobNo }` (saves an **open** job)
+- `GET /api/jobs` — list jobs (open = awaiting results, closed = calibrating)
+- `POST /api/jobs/:id/close` — `{ skidText, accuses?:[{name,dataB64}] }` → reconciles the real results into a calibration example
+- `DELETE /api/jobs/:id` · `GET /api/health`
 
 ## Deploy (PM2)
 ```bash
