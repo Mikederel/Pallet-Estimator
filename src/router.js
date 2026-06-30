@@ -37,7 +37,7 @@ palletRouter.use(async (req, res, next) => {
     next();
   } catch (err) {
     console.error("[pallet] db connection failed:", err);
-    res.status(503).json({ error: "Database unavailable" });
+    res.status(503).json({ error: "Base de données indisponible" });
   }
 });
 
@@ -47,14 +47,14 @@ palletRouter.post("/api/estimate", async (req, res) => {
   const hasText = typeof materialList === "string" && materialList.trim().length > 0;
   const validPdfs = Array.isArray(pdfs) ? pdfs.filter((p) => p && typeof p.dataB64 === "string") : [];
   if (!hasText && !validPdfs.length) {
-    return res.status(400).json({ error: "Provide the BOM as pdfs ([{name,dataB64}]) and/or materialList (text)." });
+    return res.status(400).json({ error: "Fournissez le BOM en PDF et/ou une liste de matériel (texte)." });
   }
   try {
     const result = await estimatePallets({ jobNo, materialList, pdfs: validPdfs });
     res.json(result);
   } catch (err) {
     console.error("[estimate] error:", err);
-    res.status(502).json({ error: err.message || "Estimation failed" });
+    res.status(502).json({ error: err.message || "Échec de l'estimation" });
   }
 });
 
@@ -78,15 +78,15 @@ palletRouter.get("/api/jobs", async (req, res) => {
 palletRouter.post("/api/jobs/:id/close", async (req, res) => {
   const { skidText, accuses } = req.body || {};
   if (!skidText || typeof skidText !== "string" || !skidText.trim()) {
-    return res.status(400).json({ error: "skidText (the real pallet list, as text) is required." });
+    return res.status(400).json({ error: "La vraie liste de palettes (.txt) est requise." });
   }
   let job;
   try {
     job = await collections.jobs().findOne({ _id: new ObjectId(req.params.id) });
   } catch {
-    return res.status(400).json({ error: "invalid id" });
+    return res.status(400).json({ error: "Identifiant invalide" });
   }
-  if (!job) return res.status(404).json({ error: "job not found" });
+  if (!job) return res.status(404).json({ error: "Job introuvable" });
 
   try {
     const accuseTexts = [];
@@ -112,7 +112,7 @@ palletRouter.post("/api/jobs/:id/close", async (req, res) => {
     res.json({ ok: true, actual: norm });
   } catch (err) {
     console.error("[close] error:", err);
-    res.status(502).json({ error: err.message || "Could not close the job" });
+    res.status(502).json({ error: err.message || "Impossible de clôturer le job" });
   }
 });
 
@@ -120,9 +120,9 @@ palletRouter.post("/api/jobs/:id/close", async (req, res) => {
 palletRouter.delete("/api/jobs/:id", async (req, res) => {
   try {
     const { deletedCount } = await collections.jobs().deleteOne({ _id: new ObjectId(req.params.id) });
-    if (!deletedCount) return res.status(404).json({ error: "not found" });
+    if (!deletedCount) return res.status(404).json({ error: "Introuvable" });
     res.json({ ok: true });
   } catch {
-    res.status(400).json({ error: "invalid id" });
+    res.status(400).json({ error: "Identifiant invalide" });
   }
 });
