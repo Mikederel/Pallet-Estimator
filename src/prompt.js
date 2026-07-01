@@ -6,7 +6,14 @@ export const DIM_RULES = `Report every pallet/skid as W x L x H in inches:
 - W (width) comes first, and is normally <= 48".
 - L (length) is the long side, normally <= 145".
 - H (height) is the vertical, and should fit a 53' trailer — aim for <= 68".
-Weights are in pounds (lb).`;
+Weights are in pounds (lb).
+
+RAIL LENGTH RULE — applies whenever the BOM contains items whose description includes "RAIL+" or "S-RAIL":
+- Those pieces are never manufactured longer than 144". Any listed length > 144" is a total run, not a single piece.
+- The pallet length for those items equals the length of the longest single piece (always <= 144").
+  Example: "RAIL+ 10× 20' run" → pieces are 144" max → pallet L = 144".
+  Example: "S-RAIL 6× 123" pieces" → pallet L = 123".
+- Never set a pallet L > 144" for a pallet that carries only RAIL+/S-RAIL items.`;
 
 function formatPallets(pallets = []) {
   return pallets

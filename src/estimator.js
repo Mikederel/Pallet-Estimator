@@ -8,7 +8,7 @@ const PALLET = {
   type: "object",
   properties: {
     w: { type: "number", description: "Width in inches (typically <= 48)" },
-    l: { type: "number", description: "Length in inches (long side, <= ~145)" },
+    l: { type: "number", description: "Length in inches (long side, <= ~145; for RAIL+/S-RAIL items always <= 144)" },
     h: { type: "number", description: "Height in inches (aim <= 68)" },
     weight: { type: "number", description: "Approximate weight in lb" },
   },
